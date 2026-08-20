@@ -3,9 +3,12 @@ import io
 import json
 import logging
 import os
+import re
 import sys
+import time
 import urllib.request
 import urllib.error
+from collections import deque
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stderr)
@@ -18,12 +21,105 @@ except ImportError:
     sys.exit(1)
 
 NVIDIA_API_BASE = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 NVIDIA_MODEL = os.environ.get("NVIDIA_MODEL", "minimaxai/minimax-m3")
 NVIDIA_TIMEOUT = int(os.environ.get("NVIDIA_TIMEOUT", "120"))
 NVIDIA_MAX_DIMENSION = int(os.environ.get("NVIDIA_MAX_DIMENSION", "2048"))
 NVIDIA_JPEG_QUALITY = int(os.environ.get("NVIDIA_JPEG_QUALITY", "85"))
 NVIDIA_THINKING_MODE = os.environ.get("NVIDIA_THINKING_MODE", "").strip().lower()
+
+# ---------------------------------------------------------------------------
+# API key ring + rotation
+#
+# Multiple keys are supported. Keys are tried in order; on a retryable error
+# (HTTP 401/403/404/408/429/5xx or a connection/timeout failure) the current
+# key is moved to the END of the queue and the next key is tried, giving the
+# previous key's rate-limit quota time to refresh. Keys are never deleted.
+#
+# Key sources (all optional, combined in this order, duplicates removed):
+#   NVIDIA_API_KEY          single key (backwards compatible)
+#   NVIDIA_API_KEYS         comma / semicolon / whitespace separated list
+#   NVIDIA_API_KEY_1..N     numbered keys
+#
+# Rotation tuning:
+#   NVIDIA_ROTATION_MAX_RETRIES   total attempts across all keys (default = key count)
+#   NVIDIA_ROTATION_BACKOFF       seconds to sleep after a failed attempt (default 2)
+# ---------------------------------------------------------------------------
+RETRYABLE_STATUSES = {401, 403, 404, 408, 429, 500, 502, 503, 504}
+
+
+class ApiError(RuntimeError):
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+def _load_api_keys():
+    keys = []
+    seen = set()
+
+    def add(value):
+        for part in re.split(r"[\s,;]+", value):
+            part = part.strip()
+            if part and part not in seen:
+                seen.add(part)
+                keys.append(part)
+
+    add(os.environ.get("NVIDIA_API_KEY", ""))
+    add(os.environ.get("NVIDIA_API_KEYS", ""))
+    i = 1
+    while True:
+        numbered = os.environ.get("NVIDIA_API_KEY_{}".format(i), "")
+        if not numbered.strip():
+            break
+        add(numbered)
+        i += 1
+    return keys
+
+
+KEY_RING = deque(_load_api_keys())
+ROTATION_MAX_RETRIES = int(os.environ.get("NVIDIA_ROTATION_MAX_RETRIES", "0") or "0") or len(KEY_RING) or 1
+ROTATION_BACKOFF = float(os.environ.get("NVIDIA_ROTATION_BACKOFF", "2") or "2")
+
+
+def _current_key():
+    return KEY_RING[0] if KEY_RING else None
+
+
+def _rotate():
+    if len(KEY_RING) > 1:
+        KEY_RING.rotate(-1)
+        logger.info("NVIDIA API key rotated to next key (queue has %d keys)", len(KEY_RING))
+
+
+def _with_rotation(fn):
+    """Run fn(key) for each key in the ring, rotating on retryable errors.
+
+    The ring is preserved across calls, so a key that hit its rate limit is
+    moved to the back and gets a chance to refresh before it is tried again.
+    Raises the last error once every key has been tried (or on a non-retryable
+    error).
+    """
+    attempts = 0
+    while True:
+        key = _current_key()
+        if not key:
+            raise RuntimeError(
+                "No NVIDIA API key configured (set NVIDIA_API_KEY, "
+                "NVIDIA_API_KEYS or NVIDIA_API_KEY_1..N)"
+            )
+        try:
+            return fn(key)
+        except ApiError as exc:
+            attempts += 1
+            retryable = exc.status is None or exc.status in RETRYABLE_STATUSES
+            if not retryable or attempts >= ROTATION_MAX_RETRIES or len(KEY_RING) <= 1:
+                raise
+            logger.warning(
+                "NVIDIA API error (status=%s, attempt %d/%d): %s",
+                exc.status, attempts, ROTATION_MAX_RETRIES, exc,
+            )
+            _rotate()
+            time.sleep(ROTATION_BACKOFF)
 
 # Multimodal (vision) models exposed through the NVIDIA NIM hosted API.
 VISION_MODELS = {
@@ -146,7 +242,7 @@ def _extract_text(message: dict) -> str:
     return ""
 
 
-def _call_nvidia_api(image_b64: str, prompt: str, model: str) -> str:
+def _call_nvidia_api(api_key: str, image_b64: str, prompt: str, model: str) -> str:
     payload = {
         "model": model,
         "messages": [
@@ -174,7 +270,7 @@ def _call_nvidia_api(image_b64: str, prompt: str, model: str) -> str:
         url,
         data=body,
         headers={
-            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
@@ -186,9 +282,9 @@ def _call_nvidia_api(image_b64: str, prompt: str, model: str) -> str:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"NVIDIA API HTTP {exc.code}: {error_body}") from exc
+        raise ApiError(f"NVIDIA API HTTP {exc.code}: {error_body}", status=exc.code) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"NVIDIA API connection error: {exc.reason}") from exc
+        raise ApiError(f"NVIDIA API connection error: {exc.reason}") from exc
 
     result = json.loads(raw)
     choices = result.get("choices", [])
@@ -201,24 +297,30 @@ def _call_nvidia_api(image_b64: str, prompt: str, model: str) -> str:
     return text
 
 
-def _fetch_live_models() -> list:
+def _fetch_live_models(api_key: str) -> list:
     """Best-effort query of the models the key can access via /v1/models."""
     url = NVIDIA_API_BASE.rstrip("/") + "/models"
     req = urllib.request.Request(
         url,
         headers={
-            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=NVIDIA_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise ApiError(
+            "Could not query live model list (HTTP {}): {}".format(
+                exc.code, exc.read().decode("utf-8", errors="replace")
+            ),
+            status=exc.code,
+        ) from exc
     except Exception as exc:
-        raise RuntimeError(f"Could not query live model list: {exc}") from exc
+        raise ApiError("Could not query live model list: {}".format(exc)) from exc
 
-    ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
-    return ids
+    return [m.get("id") for m in data.get("data", []) if m.get("id")]
 
 
 def _send(message: dict):
@@ -243,7 +345,7 @@ def _handle_request(message: dict) -> dict:
             response["result"] = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "opencode-eyes-nvidia", "version": "1.0.0"},
+                "serverInfo": {"name": "opencode-eyes-nvidia", "version": "1.1.0"},
             }
         elif method == "tools/list":
             response["result"] = {"tools": _TOOLS}
@@ -258,9 +360,9 @@ def _handle_request(message: dict) -> dict:
                     ctx = meta.get("context")
                     ctx_str = f"{ctx:,}" if ctx else "N/A"
                     lines.append(f"- {mid}{tag}: {meta['description']} (context: {ctx_str})")
-                if NVIDIA_API_KEY:
+                if _current_key():
                     try:
-                        live = _fetch_live_models()
+                        live = _with_rotation(_fetch_live_models)
                         lines.append("")
                         lines.append("当前 API Key 可访问的模型: " + ", ".join(live))
                     except Exception as exc:
@@ -276,8 +378,11 @@ def _handle_request(message: dict) -> dict:
 
                 if not image_path:
                     raise ValueError("image_path is required")
-                if not NVIDIA_API_KEY:
-                    raise RuntimeError("NVIDIA_API_KEY environment variable is not set")
+                if not _current_key():
+                    raise RuntimeError(
+                        "No NVIDIA API key configured (set NVIDIA_API_KEY, "
+                        "NVIDIA_API_KEYS or NVIDIA_API_KEY_1..N)"
+                    )
 
                 if model not in VISION_MODELS:
                     raise ValueError(
@@ -285,7 +390,7 @@ def _handle_request(message: dict) -> dict:
                     )
 
                 image_b64 = _encode_image(image_path)
-                description = _call_nvidia_api(image_b64, prompt, model)
+                description = _with_rotation(lambda key: _call_nvidia_api(key, image_b64, prompt, model))
 
                 response["result"] = {
                     "content": [
@@ -304,9 +409,15 @@ def _handle_request(message: dict) -> dict:
 
 
 def main():
-    if not NVIDIA_API_KEY:
-        logger.warning("NVIDIA_API_KEY is not set. Set it via environment variable.")
-    logger.info("opencode-eyes-nvidia server starting (model=%s, base=%s)", NVIDIA_MODEL, NVIDIA_API_BASE)
+    if not _current_key():
+        logger.warning(
+            "No NVIDIA API key configured. Set NVIDIA_API_KEY, "
+            "NVIDIA_API_KEYS or NVIDIA_API_KEY_1..N."
+        )
+    logger.info(
+        "opencode-eyes-nvidia server starting (model=%s, base=%s, keys=%d)",
+        NVIDIA_MODEL, NVIDIA_API_BASE, len(KEY_RING),
+    )
 
     for raw_line in sys.stdin.buffer:
         line_str = raw_line.decode("utf-8", errors="replace").strip()

@@ -31,13 +31,65 @@ MCP server that provides image description capability using NVIDIA NIM hosted AP
 
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| `NVIDIA_API_KEY` | 是 | — | NVIDIA API Key（在 https://build.nvidia.com 获取，`nvapi-...`） |
+| `NVIDIA_API_KEY` | 否* | — | 单个 NVIDIA API Key（在 https://build.nvidia.com 获取，`nvapi-...`） |
+| `NVIDIA_API_KEYS` | 否* | — | 多个 Key，用逗号 / 分号 / 空格 / 换行分隔 |
+| `NVIDIA_API_KEY_1` … `NVIDIA_API_KEY_N` | 否* | — | 编号 Key，`NVIDIA_API_KEY_1` 起依次读取 |
 | `NVIDIA_BASE_URL` | 否 | `https://integrate.api.nvidia.com/v1` | API 基础地址 |
 | `NVIDIA_MODEL` | 否 | `minimaxai/minimax-m3` | 默认使用的多模态模型 |
 | `NVIDIA_TIMEOUT` | 否 | `120` | API 请求超时（秒） |
 | `NVIDIA_MAX_DIMENSION` | 否 | `2048` | 发送前图片最长边缩放到该像素，0 表示不缩放 |
 | `NVIDIA_JPEG_QUALITY` | 否 | `85` | 发送前 JPEG 压缩质量（0-100） |
 | `NVIDIA_THINKING_MODE` | 否 | （空） | MiniMax-M3 推理模式：`enabled` / `disabled` / `adaptive` |
+| `NVIDIA_ROTATION_MAX_RETRIES` | 否 | Key 数量 | 轮询总尝试次数（跨所有 Key） |
+| `NVIDIA_ROTATION_BACKOFF` | 否 | `2` | 每次失败后等待的秒数（等待配额刷新） |
+
+\* 至少需要配置一个 Key：`NVIDIA_API_KEY`、`NVIDIA_API_KEYS` 或 `NVIDIA_API_KEY_1..N` 任一即可，可同时配置（去重合并）。
+
+## Key 轮询（多 Key 自动切换）
+
+支持配置多个 API Key：请求按顺序使用，遇错自动切换到下一个 Key，**不会删除原 Key**，
+只是把它排到队列末尾，等待其配额刷新后再用。全程自动重试，无需人工干预。
+
+工作方式：
+
+1. 启动时把所有 Key 合并进一个队列（去重，按 `NVIDIA_API_KEY` → `NVIDIA_API_KEYS` → `NVIDIA_API_KEY_1..N` 顺序）。
+2. 请求默认使用队首 Key。
+3. 遇到可重试错误（HTTP `401 / 403 / 404 / 408 / 429 / 5xx`，或连接超时）时：
+   队首 Key 移到队尾，等待 `NVIDIA_ROTATION_BACKOFF` 秒后改用下一个 Key 重试。
+4. 所有 Key 都被轮过之后（共 `NVIDIA_ROTATION_MAX_RETRIES` 次尝试）仍未成功，才抛出最后一个错误。
+5. 队列状态在多次调用间保留——被限流的 Key 会排在后面，等下次轮到时配额往往已刷新。
+
+示例：
+
+```bash
+# 方式一：逗号分隔多个 Key
+set NVIDIA_API_KEYS=nvapi-key-1,nvapi-key-2,nvapi-key-3
+
+# 方式二：编号 Key
+set NVIDIA_API_KEY_1=nvapi-key-1
+set NVIDIA_API_KEY_2=nvapi-key-2
+
+# 方式三：单个 Key（向后兼容）
+set NVIDIA_API_KEY=nvapi-key-1
+```
+
+在 OpenCode 配置中把环境变量传给 MCP 服务：
+
+```json
+{
+  "mcp": {
+    "opencode-eyes-nvidia": {
+      "type": "local",
+      "command": ["python", "-m", "opencode_eyes_nvidia"],
+      "enabled": true,
+      "timeout": 120000,
+      "environment": {
+        "NVIDIA_API_KEYS": "{env:NVIDIA_API_KEYS}"
+      }
+    }
+  }
+}
+```
 
 ## 安装
 
@@ -54,8 +106,9 @@ pip install .
 ## 运行
 
 ```bash
-# 设置环境变量（Windows）
+# 设置环境变量（Windows，至少一种）
 set NVIDIA_API_KEY=nvapi-你的key
+# 或 set NVIDIA_API_KEYS=nvapi-key-1,nvapi-key-2
 
 # 启动服务
 python -m opencode_eyes_nvidia
@@ -72,6 +125,7 @@ python -m opencode_eyes_nvidia
       "enabled": true,
       "timeout": 120000,
       "environment": {
+        "NVIDIA_API_KEYS": "{env:NVIDIA_API_KEYS}",
         "NVIDIA_API_KEY": "{env:NVIDIA_API_KEY}"
       }
     }
@@ -102,6 +156,7 @@ python -m opencode_eyes_nvidia
 - 默认模型从 `step-3.7-flash` 换成 **MiniMax-M3**（`minimaxai/minimax-m3`）
 - 新增 `list_vision_models` 工具与多模型切换能力
 - 支持 MiniMax-M3 的 `thinking_mode` 推理控制
+- 支持**多 API Key 轮询**：遇错自动切换下一个 Key，原 Key 排到队尾等待配额刷新
 
 ## License
 
