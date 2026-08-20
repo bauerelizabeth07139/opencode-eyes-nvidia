@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opencode-eyes-nvidia"
+version = "1.0.0"
+description = "MCP server providing image description using NVIDIA NIM API (https://integrate.api.nvidia.com/v1) with MiniMax-M3 multimodal model. Gives vision to models without multimodal ability."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = ["Pillow>=9.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
