@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "opencode-eyes-nvidia 图片描述",
+    "description": "走 NVIDIA NIM 给不具备多模态能力的模型一双眼睛:挂载本地 stdio MCP 服务器,用 7 个托管视觉模型之一(默认 MiniMax-M3)描述图片,并支持多 Key 轮换。"
+  }
+}

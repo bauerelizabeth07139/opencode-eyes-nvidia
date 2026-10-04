@@ -1,0 +1,64 @@
+{
+  "name": "dsh-opencode-eyes-nvidia",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: eyes for text-only models through NVIDIA NIM. It mounts the bundled opencode-eyes-nvidia MCP server, which sends an image to a hosted vision model (MiniMax-M3 by default) and returns a description, exposing mcp__opencode_eyes_nvidia__describe_image and mcp__opencode_eyes_nvidia__list_vision_models.",
+  "type": "module",
+  "license": "MIT",
+  "author": "bauerelizabeth07139",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bauerelizabeth07139/opencode-eyes-nvidia.git"
+  },
+  "homepage": "https://github.com/bauerelizabeth07139/opencode-eyes-nvidia#readme",
+  "bugs": {
+    "url": "https://github.com/bauerelizabeth07139/opencode-eyes-nvidia/issues"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale",
+    "assets",
+    "test",
+    "README.md",
+    "LICENSE",
+    "src",
+    "pyproject.toml",
+    "requirements.txt"
+  ],
+  "engines": {
+    "node": ">=22",
+    "python": ">=3.8",
+    "dsh": ">=0.1.5-rc.1 <0.2.0-0 || >=0.2.0-rc.0 <0.3.0-0"
+  },
+  "icon": "./assets/icon.svg",
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node test/plugin.test.mjs && node --import ./test/hooks.mjs test/mount.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.2",
+    "@deepseek-ai/dsh-mcp-client": ">=0.1.5-rc.1 <0.2.0-0 || >=0.2.0-rc.0 <0.3.0-0"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "mcp",
+    "vision",
+    "image",
+    "nvidia",
+    "nim"
+  ]
+}

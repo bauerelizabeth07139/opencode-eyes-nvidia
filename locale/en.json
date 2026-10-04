@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "opencode-eyes-nvidia",
+    "description": "Eyes for text-only models through NVIDIA NIM: mounts a local stdio MCP server that describes an image with any of seven hosted vision models (MiniMax-M3 by default) and rotates several API keys, as mcp__opencode_eyes_nvidia__describe_image."
+  }
+}

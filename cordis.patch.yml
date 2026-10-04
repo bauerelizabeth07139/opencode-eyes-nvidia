@@ -1,0 +1,19 @@
+# dsh-opencode-eyes-nvidia bundle patch — the loader row that activates the host half.
+#
+#   id:   loader-row id, used for patch targeting/disable, must be unique
+#   name: the package specifier the loader imports. It must match this
+#         package's `name` in package.json character for character.
+#
+# The plugin reads its configuration defensively, so this row needs no
+# `config:` block. Every field is optional:
+#
+#   - insert:
+#       - id: dsh-opencode-eyes-nvidia
+#         name: 'dsh-opencode-eyes-nvidia'
+#         config:
+#           python: 'C:\Python312\python.exe'
+#           apiKey: 'nvapi-...'
+#           toolCallTimeoutMs: 300000
+- insert:
+    - id: dsh-opencode-eyes-nvidia
+      name: 'dsh-opencode-eyes-nvidia'

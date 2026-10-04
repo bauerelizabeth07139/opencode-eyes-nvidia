@@ -1,120 +1,165 @@
-# opencode-eyes-nvidia 👁️
+# opencode-eyes-nvidia
 
-MCP server that provides image description capability using NVIDIA NIM hosted API
-(`https://integrate.api.nvidia.com/v1`) with the **MiniMax-M3** multimodal model.
+**Eyes for models that cannot see — on NVIDIA NIM.** Any of seven hosted
+vision models (MiniMax-M3 by default), with multi-key rotation when one key is
+rate-limited.
 
-为不具备多模态能力的模型提供**"眼睛"**。将图片输入，即可获得详细的图片文字描述。
+*给不具备多模态能力的模型一双眼睛:走 NVIDIA NIM,默认 MiniMax-M3,支持多 Key 轮换。*
 
-## 功能
+As a DeepSeek Harness plugin: the MCP server ships inside the bundle, so
+installing one plugin is the whole setup — no `mcpServers` file to hand-edit.
 
-| 工具 | 说明 |
-|------|------|
-| `describe_image` | 描述一张图片的内容，默认使用 MiniMax-M3 多模态大模型 |
-| `list_vision_models` | 列出 NVIDIA NIM API 上可用的多模态（视觉）模型 |
+## Install
 
-## 多模态模型
+**DeepSeek Harness Desktop** — open **Plugins** in the sidebar, choose **Add
+plugin**, and enter:
 
-默认模型为 `minimaxai/minimax-m3`（文本/图像/视频输入 → 文本输出，1M 上下文，支持推理）。
-可通过 `NVIDIA_MODEL` 或 `describe_image` 的 `model` 参数切换：
-
-| 模型 ID | 说明 |
-|---------|------|
-| `minimaxai/minimax-m3` | MiniMax-M3 多模态 MoE VLM（默认，支持图像/视频） |
-| `meta/llama-3.2-11b-vision-instruct` | Meta Llama 3.2 11B Vision |
-| `meta/llama-3.2-90b-vision-instruct` | Meta Llama 3.2 90B Vision |
-| `nvidia/llama-3.1-nemotron-nano-vl-8b-v1` | NVIDIA Nemotron Nano VL 8B |
-| `google/gemma-3-27b-it` | Google Gemma 3 27B IT |
-| `nvidia/nemotron-nano-12b-v2-vl` | NVIDIA Nemotron Nano 12B v2 VL |
-| `qwen/qwen3.5-397b-a17b` | Qwen 3.5 397B A17B VLM |
-
-## 环境变量
-
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `NVIDIA_API_KEY` | 否* | — | 单个 NVIDIA API Key（在 https://build.nvidia.com 获取，`nvapi-...`） |
-| `NVIDIA_API_KEYS` | 否* | — | 多个 Key，用逗号 / 分号 / 空格 / 换行分隔 |
-| `NVIDIA_API_KEY_1` … `NVIDIA_API_KEY_N` | 否* | — | 编号 Key，`NVIDIA_API_KEY_1` 起依次读取 |
-| `NVIDIA_BASE_URL` | 否 | `https://integrate.api.nvidia.com/v1` | API 基础地址 |
-| `NVIDIA_MODEL` | 否 | `minimaxai/minimax-m3` | 默认使用的多模态模型 |
-| `NVIDIA_TIMEOUT` | 否 | `120` | API 请求超时（秒） |
-| `NVIDIA_MAX_DIMENSION` | 否 | `2048` | 发送前图片最长边缩放到该像素，0 表示不缩放 |
-| `NVIDIA_JPEG_QUALITY` | 否 | `85` | 发送前 JPEG 压缩质量（0-100） |
-| `NVIDIA_THINKING_MODE` | 否 | （空） | MiniMax-M3 推理模式：`enabled` / `disabled` / `adaptive` |
-| `NVIDIA_ROTATION_MAX_RETRIES` | 否 | Key 数量 | 轮询总尝试次数（跨所有 Key） |
-| `NVIDIA_ROTATION_BACKOFF` | 否 | `2` | 每次失败后等待的秒数（等待配额刷新） |
-
-\* 至少需要配置一个 Key：`NVIDIA_API_KEY`、`NVIDIA_API_KEYS` 或 `NVIDIA_API_KEY_1..N` 任一即可，可同时配置（去重合并）。
-
-## Key 轮询（多 Key 自动切换）
-
-支持配置多个 API Key：请求按顺序使用，遇错自动切换到下一个 Key，**不会删除原 Key**，
-只是把它排到队列末尾，等待其配额刷新后再用。全程自动重试，无需人工干预。
-
-工作方式：
-
-1. 启动时把所有 Key 合并进一个队列（去重，按 `NVIDIA_API_KEY` → `NVIDIA_API_KEYS` → `NVIDIA_API_KEY_1..N` 顺序）。
-2. 请求默认使用队首 Key。
-3. 遇到可重试错误（HTTP `401 / 403 / 404 / 408 / 429 / 5xx`，或连接超时）时：
-   队首 Key 移到队尾，等待 `NVIDIA_ROTATION_BACKOFF` 秒后改用下一个 Key 重试。
-4. 所有 Key 都被轮过之后（共 `NVIDIA_ROTATION_MAX_RETRIES` 次尝试）仍未成功，才抛出最后一个错误。
-5. 队列状态在多次调用间保留——被限流的 Key 会排在后面，等下次轮到时配额往往已刷新。
-
-示例：
-
-```bash
-# 方式一：逗号分隔多个 Key
-set NVIDIA_API_KEYS=nvapi-key-1,nvapi-key-2,nvapi-key-3
-
-# 方式二：编号 Key
-set NVIDIA_API_KEY_1=nvapi-key-1
-set NVIDIA_API_KEY_2=nvapi-key-2
-
-# 方式三：单个 Key（向后兼容）
-set NVIDIA_API_KEY=nvapi-key-1
+```
+https://github.com/bauerelizabeth07139/opencode-eyes-nvidia
 ```
 
-在 OpenCode 配置中把环境变量传给 MCP 服务：
+Then switch the new **dsh-opencode-eyes-nvidia** bundle on. The Desktop app boots the
+reserved `desktop` profile, so that is where it has to be enabled.
 
-```json
-{
-  "mcp": {
-    "opencode-eyes-nvidia": {
-      "type": "local",
-      "command": ["python", "-m", "opencode_eyes_nvidia"],
-      "enabled": true,
-      "timeout": 120000,
-      "environment": {
-        "NVIDIA_API_KEYS": "{env:NVIDIA_API_KEYS}"
-      }
-    }
-  }
-}
+**dsh CLI** — install it into the profile you actually boot:
+
+```sh
+dsh plugin --profile web add bauerelizabeth07139/opencode-eyes-nvidia
 ```
 
-## 安装
+**No git on the machine?** pnpm resolves a git shorthand with `git ls-remote`,
+which fails with `'git' is not recognized` when git is missing. Use the tarball
+instead — that path is plain HTTPS:
 
-```bash
-pip install -r requirements.txt
+```sh
+dsh plugin --profile web add https://codeload.github.com/bauerelizabeth07139/opencode-eyes-nvidia/tar.gz/main
 ```
 
-或安装为包：
+The same address works in the Desktop **Add plugin** dialog. Replace `main`
+with a commit SHA to pin an exact revision (`/tar.gz/<sha>`).
 
-```bash
-pip install .
+Uninstall with `dsh plugin --profile web remove dsh-opencode-eyes-nvidia`.
+
+## Requirements
+
+- **Python ≥ 3.8** on `PATH`, or pointed at with `python`.
+- **Pillow** in that interpreter — the server's only third-party import
+  (`pip install Pillow`).
+- **At least one NVIDIA API key.** The server accepts `NVIDIA_API_KEY`,
+  `NVIDIA_API_KEYS` (several, separated by spaces/commas/semicolons) or
+  `NVIDIA_API_KEY_1..N`, and rotates through them on failure. `describe_image`
+  needs one; `list_vision_models` works without.
+
+## Tools
+
+The server registers `2` tool(s). DSH namespaces them automatically,
+so the model calls them as `mcp__opencode_eyes_nvidia__<tool>`:
+
+| Tool | What it does |
+|---|---|
+| `describe_image` | Sends an image to the chosen NVIDIA-hosted vision model. Parameters: `image_path` (required), `prompt` (optional), `model` (optional; one of `minimaxai/minimax-m3`, `meta/llama-3.2-11b-vision-instruct`, `meta/llama-3.2-90b-vision-instruct`, `nvidia/llama-3.1-nemotron-nano-vl-8b-v1`, `google/gemma-3-27b-it`, `nvidia/nemotron-nano-12b-v2-vl`, `qwen/qwen3.5-397b-a17b`). |
+| `list_vision_models` | Returns the model list, consulting the live `/models` endpoint when a key is present. |
+
+## Configuration
+
+| Key | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `python` | — | discovered | interpreter that runs the server |
+| `apiKey` | `NVIDIA_API_KEY` | *(empty)* | the first key of the rotation ring |
+| `model` | `NVIDIA_MODEL` | `minimaxai/minimax-m3` | default model id |
+| `baseUrl` | `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NIM endpoint |
+| `timeoutSeconds` | `NVIDIA_TIMEOUT` | `120` | the server's own HTTP timeout |
+| `maxDimension` | `NVIDIA_MAX_DIMENSION` | `2048` | images are downscaled to this edge length |
+| `jpegQuality` | `NVIDIA_JPEG_QUALITY` | `85` | JPEG quality of the re-encoded image |
+| `thinkingMode` | `NVIDIA_THINKING_MODE` | *(unset)* | `enabled` / `disabled` / `adaptive`; only sent to `minimax` models |
+| `toolCallTimeoutMs` | — | `300000` | DSH's per-call budget; key rotation sleeps between attempts |
+| `env` | — | `{}` | raw passthrough — **use this for `NVIDIA_API_KEYS` and `NVIDIA_API_KEY_1..N`** |
+
+Every field is optional and lives in the loader row. For example, in
+`cordis.patch.yml`:
+
+```yaml
+- id: dsh-opencode-eyes-nvidia
+  name: 'dsh-opencode-eyes-nvidia'
+  config:
+    apiKey: 'nvapi-...'
+    model: 'minimaxai/minimax-m3'
+    env:
+      NVIDIA_API_KEYS: 'nvapi-first,nvapi-second'
 ```
 
-## 运行
+## Notes
 
-```bash
-# 设置环境变量（Windows，至少一种）
-set NVIDIA_API_KEY=nvapi-你的key
-# 或 set NVIDIA_API_KEYS=nvapi-key-1,nvapi-key-2
+- **Rotating several keys.** `config.apiKey` sets `NVIDIA_API_KEY`; to use the
+  rotation ring, pass the extra variables through `config.env`:
 
-# 启动服务
-python -m opencode_eyes_nvidia
+  ```yaml
+  config:
+    env:
+      NVIDIA_API_KEYS: 'nvapi-first,nvapi-second'
+      NVIDIA_ROTATION_BACKOFF: '2'
+  ```
+
+- **Timeouts.** A call may try several keys with a 2 s backoff between attempts,
+  on top of the server's own 120 s HTTP timeout — the plugin mounts with a
+  300 s budget.
+- **`thinkingMode` is silently ignored** unless the model id contains
+  `minimax`, which is the server's own rule.
+
+## How it is mounted
+
+`index.js` resolves a Python interpreter (the configured `python`, then
+`python3`/`python` on `PATH`), hands the server its argv and working directory,
+and mounts it as a stdio MCP server through `@deepseek-ai/dsh-mcp-client` with
+`failOnStartupError: true`, so a server that cannot start is a visible error
+rather than a silently missing tool.
+
+Credentials are forwarded explicitly. The harness scrubs credential-shaped
+variables (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`) out of the environment a child
+process inherits, so `config.apiKey` — falling back to the variable the server
+documents — is written into the child's environment by the plugin itself. That
+means both of these work:
+
+```yaml
+config:
+  apiKey: '<your key>'
 ```
 
-## 在 OpenCode 中配置
+```sh
+export NVIDIA_API_KEY='<your key>'   # picked up at load time
+```
+
+## Development
+
+No build step and no runtime dependencies — `@deepseek-ai/cordis` and
+`@deepseek-ai/dsh-mcp-client` are peers supplied by the Harness.
+
+```sh
+npm test    # node >= 22: manifest checks + the stdio mount, both Harness-free
+```
+
+The mount test loads `index.js` with `@deepseek-ai/dsh-mcp-client` stubbed and
+asserts the exact stdio configuration the plugin produces, including the
+credential forwarding above.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `index.js` | the DSH plugin: resolves the interpreter and mounts the server |
+| `cordis.patch.yml` | the loader row that activates the plugin |
+| `locale/{en,zh}.json` | card title and description for the plugin lists |
+| `assets/icon.svg` | card artwork |
+| `test/` | `npm test`: manifest composition and the mount contract |
+| `src/opencode_eyes_nvidia/` | the MCP server, unchanged |
+| `pyproject.toml`, `requirements.txt` | the Python package metadata, unchanged |
+
+## Other hosts (unchanged)
+
+The server is a plain stdio MCP server and still works anywhere else. The
+repository's original README is kept verbatim as
+[`README.opencode.md`](README.opencode.md), and the launch stanza from it keeps
+working:
 
 ```json
 {
@@ -133,31 +178,9 @@ python -m opencode_eyes_nvidia
 }
 ```
 
-## 手动测试
-
-不启动 opencode，直接通过 stdio 验证：
-
-```powershell
-$env:NVIDIA_API_KEY = "nvapi-xxx"
-python -m opencode_eyes_nvidia
-```
-
-然后在另一终端发送 MCP JSON-RPC 消息，例如：
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list"}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"describe_image","arguments":{"image_path":"C:/path/to/photo.jpg"}}}
-```
-
-## 与 opencode-eyes 的区别
-
-- API 从 StepFun 换成 **NVIDIA NIM**（`https://integrate.api.nvidia.com/v1`）
-- 默认模型从 `step-3.7-flash` 换成 **MiniMax-M3**（`minimaxai/minimax-m3`）
-- 新增 `list_vision_models` 工具与多模型切换能力
-- 支持 MiniMax-M3 的 `thinking_mode` 推理控制
-- 支持**多 API Key 轮询**：遇错自动切换下一个 Key，原 Key 排到队尾等待配额刷新
+On another host, run the server from the repository's `src` directory (or put
+`src` on `PYTHONPATH`).
 
 ## License
 
-MIT
+[MIT](LICENSE) — the repository declared MIT in `pyproject.toml` but shipped no licence file; this plugin's release adds one.
