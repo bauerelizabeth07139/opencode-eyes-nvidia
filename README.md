@@ -1,5 +1,7 @@
 # opencode-eyes-nvidia
 
+[![dsh.so risk](https://www.dsh.so/badge/opencode-eyes-nvidia.svg)](https://www.dsh.so/artifact/opencode-eyes-nvidia/)
+
 **Eyes for models that cannot see — on NVIDIA NIM.** Any of seven hosted
 vision models (MiniMax-M3 by default), with multi-key rotation when one key is
 rate-limited.
